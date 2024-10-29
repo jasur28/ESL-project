@@ -1,86 +1,56 @@
-/**
- * Copyright (c) 2014 - 2021, Nordic Semiconductor ASA
- *
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *    list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form, except as embedded into a Nordic
- *    Semiconductor ASA integrated circuit in a product or a software update for
- *    such product, must reproduce the above copyright notice, this list of
- *    conditions and the following disclaimer in the documentation and/or other
- *    materials provided with the distribution.
- *
- * 3. Neither the name of Nordic Semiconductor ASA nor the names of its
- *    contributors may be used to endorse or promote products derived from this
- *    software without specific prior written permission.
- *
- * 4. This software, with or without modification, must only be used with a
- *    Nordic Semiconductor ASA integrated circuit.
- *
- * 5. Any software provided in binary form under this license must not be reverse
- *    engineered, decompiled, modified and/or disassembled.
- *
- * THIS SOFTWARE IS PROVIDED BY NORDIC SEMICONDUCTOR ASA "AS IS" AND ANY EXPRESS
- * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY, NONINFRINGEMENT, AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL NORDIC SEMICONDUCTOR ASA OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
-/** @file
- *
- * @defgroup blinky_example_main main.c
- * @{
- * @ingroup blinky_example
- * @brief Blinky Example Application main file.
- *
- * This file contains the source code for a sample application to blink LEDs.
- *
- */
-
 #include <stdbool.h>
 #include <stdint.h>
 #include "nrf_delay.h"
 #include "boards.h"
+#include "nrf_gpio.h"
 
-/**
- * @brief Function for application main entry.
- */
+//convert port and pin into pin number
+#define red_led_pin  NRF_GPIO_PIN_MAP(0,8)
+#define green_led_pin  NRF_GPIO_PIN_MAP(1,9)
+#define blue_led_pin  NRF_GPIO_PIN_MAP(0,12)
+#define sw_button_pin  NRF_GPIO_PIN_MAP(1,6)
+
+//configure GPIO pin as input and output
+void gpio_init()
+{
+    nrf_gpio_cfg_output(red_led_pin);
+    nrf_gpio_cfg_output(green_led_pin);
+    nrf_gpio_cfg_output(blue_led_pin);
+    nrf_gpio_cfg_input(sw_button_pin,NRF_GPIO_PIN_PULLUP);
+}
+
+void led_off()
+{
+    nrf_gpio_pin_write(green_led_pin,1);
+    nrf_gpio_pin_write(red_led_pin,1);
+    nrf_gpio_pin_write(blue_led_pin,1);
+}
+
+void led_on(int led_pin)
+{
+    nrf_gpio_pin_write(led_pin,0);
+}
+
 int main(void)
 {
-    //real device id is 7200, but for testing used 7214
-    int device_id[LEDS_NUMBER] = {7, 2, 1, 4};
+    gpio_init();
+    int led_sequence[]={red_led_pin,red_led_pin,green_led_pin,green_led_pin,green_led_pin,blue_led_pin};
+    int current_led=0;
 
-    // Configure board for LED control
-    bsp_board_init(BSP_INIT_LEDS);
-
-    
     while (true)
     {
-        for (int i = 0; i < LEDS_NUMBER; i++)
+        if(nrf_gpio_pin_read(sw_button_pin)==0)
         {
-            for (int j = 0; j < device_id[i]; j++)
-            {
-                bsp_board_led_invert(i);  
-                nrf_delay_ms(700);
-                bsp_board_led_invert(i);  
-                nrf_delay_ms(700);                
-            }
-            nrf_delay_ms(2000);  
+            led_off();
+
+            led_on(led_sequence[current_led]);
+            current_led=(current_led + 1) % (sizeof(led_sequence) / sizeof(led_sequence[0]));
+            nrf_delay_ms(500);
+        }
+        else
+        {
+            led_off();
         }
     }
 }
 
-/**
- *@}
- **/
