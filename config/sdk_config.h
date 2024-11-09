@@ -48,6 +48,14 @@
 #endif
 // <h> nRF_Libraries 
 
+
+//==========================================================
+// <e> NRFX_SYSTICK_ENABLED 
+//==========================================================
+#ifndef NRFX_SYSTICK_ENABLED
+#define NRFX_SYSTICK_ENABLED 1
+#endif
+
 //==========================================================
 // <e> NRF_BALLOC_ENABLED - nrf_balloc - Block allocator module
 //==========================================================
