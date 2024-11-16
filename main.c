@@ -3,79 +3,137 @@
 #include "nrfx_systick.h"
 #include "nrf_gpio.h"
 #include "nrf_delay.h"
-#include "app_timer.h"
 #include "nrfx_gpiote.h"
+#include "app_timer.h"
 
-// GPIO and LED definitions
+// Convert port and pin into pin number
 #define YELLOW_LED_PIN  NRF_GPIO_PIN_MAP(0,6)
-#define RED_LED_PIN     NRF_GPIO_PIN_MAP(0,8)
-#define GREEN_LED_PIN   NRF_GPIO_PIN_MAP(1,9)
-#define BLUE_LED_PIN    NRF_GPIO_PIN_MAP(0,12)
-#define SW_BUTTON_PIN   NRF_GPIO_PIN_MAP(1,6)
+#define RED_LED_PIN  NRF_GPIO_PIN_MAP(0,8)
+#define GREEN_LED_PIN  NRF_GPIO_PIN_MAP(1,9)
+#define BLUE_LED_PIN  NRF_GPIO_PIN_MAP(0,12)
+#define BUTTON_PIN  NRF_GPIO_PIN_MAP(1,6)
 
 #define LEDS_NUMBER 4
-#define PWM_FREQUENCY 1000 // 1 kHz PWM frequency
-#define PERIOD_US (16000000 / PWM_FREQUENCY) // Total period in microseconds
 
-#define DOUBLE_CLICK_INTERVAL_MS 500 // Max interval for detecting a double-click (ms)
+// PWM frequency and period calculation
+#define PWM_FREQUENCY 1000            // 1 kHz PWM frequency
+#define PERIOD_US (16000000 / PWM_FREQUENCY)  // Total period in microseconds
 
-// Function prototypes
-void gpio_init(void);
-void led_off(void);
-void systick_delay_us(uint32_t delay_us);
-void pwm_dimming_led(int led_pin, int duty_cycle);
-void gpiote_event_handler(nrfx_gpiote_pin_t pin, nrf_gpiote_polarity_t action);
-void double_click_timeout_handler(void *context);
 
-// Variables
+// Timer for double-click detection
 APP_TIMER_DEF(double_click_timer);
-volatile bool is_double_click = false;
-volatile uint8_t click_count = 0;
+static volatile bool awaiting_second_click = false; // Flag for double-click detection
+static volatile bool is_blinking_active = false;   // Flag to control LED blinking
 
-int main(void)
+// Timer timeout handler
+void double_click_timeout_handler(void* p_context)
 {
-    gpio_init();
-    nrfx_systick_init();
-    app_timer_init();
+    // Timeout reached, so reset the flag for double-click detection
+    awaiting_second_click = false;
+}
 
-    // Initialize GPIOTE
-    if (!nrfx_gpiote_is_init()) {
+// Button event handler
+void button_event_handler(nrfx_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
+{
+    if (pin == BUTTON_PIN)
+    {
+        if (awaiting_second_click)
+        {
+            // Double-click detected
+            awaiting_second_click = false;   // Reset the flag
+            app_timer_stop(double_click_timer); // Stop the timer
+
+            // Toggle blinking state on double-click
+            is_blinking_active = !is_blinking_active;
+        }
+        else
+        {
+            // Start waiting for a second click
+            awaiting_second_click = true;
+            
+            // Start or restart the timer for double-click interval
+            app_timer_start(double_click_timer, APP_TIMER_TICKS(500), NULL); // 500ms interval for double-click
+        }
+    }
+}
+
+void init_gpiote_double_click()
+{
+    // Initialize GPIOTE module
+    if (!nrfx_gpiote_is_init())
+    {
         nrfx_gpiote_init();
     }
 
-    // Configure GPIOTE for button
-    nrfx_gpiote_in_config_t button_config = NRFX_GPIOTE_CONFIG_IN_SENSE_HITOLO(true);
-    button_config.pull = NRF_GPIO_PIN_PULLUP;
-    nrfx_gpiote_in_init(SW_BUTTON_PIN, &button_config, gpiote_event_handler);
-    nrfx_gpiote_in_event_enable(SW_BUTTON_PIN, true);
+    // Configure LED pins as output
+    nrf_gpio_cfg_output(YELLOW_LED_PIN);
+    nrf_gpio_cfg_output(RED_LED_PIN);
+    nrf_gpio_cfg_output(GREEN_LED_PIN);
+    nrf_gpio_cfg_output(BLUE_LED_PIN);
 
-    // Initialize APP_TIMER for double-click detection
-    app_timer_create(&double_click_timer, APP_TIMER_MODE_SINGLE_SHOT, double_click_timeout_handler);
+    // Configure button pin with event handling
+    nrfx_gpiote_in_config_t config = NRFX_GPIOTE_CONFIG_IN_SENSE_HITOLO(true); // Sense falling edge (press)
+    config.pull = NRF_GPIO_PIN_PULLUP;
 
-    // LED control logic
+    // Initialize button with the event handler
+    nrfx_gpiote_in_init(BUTTON_PIN, &config, button_event_handler);
+    nrfx_gpiote_in_event_enable(BUTTON_PIN, true);
+}
+
+void systick_delay_us(uint32_t delay_us) {
+    nrfx_systick_state_t start;
+    nrfx_systick_get(&start);
+    while (!nrfx_systick_test(&start, delay_us));
+}
+
+// Function to simulate PWM for LED dimming
+void pwm_dimming_led(int led_pin, int duty_cycle) {
+    int timeOn = (duty_cycle * PERIOD_US) / 100;   // On time based on duty cycle
+    int timeOff = PERIOD_US - timeOn;              // Off time based on duty cycle
+
+    // Turn LED on for timeOn duration
+    nrf_gpio_pin_write(led_pin, 0);
+    systick_delay_us(timeOn);
+
+    // Turn LED off for timeOff duration
+    nrf_gpio_pin_write(led_pin, 1);
+    systick_delay_us(timeOff);
+}
+
+void led_off(void)
+{
+    nrf_gpio_pin_write(YELLOW_LED_PIN, 1);
+    nrf_gpio_pin_write(RED_LED_PIN, 1);
+    nrf_gpio_pin_write(GREEN_LED_PIN, 1);
+    nrf_gpio_pin_write(BLUE_LED_PIN, 1);
+}
+
+int main(void)
+{
+    nrfx_systick_init();       // Initialize Systick timer
+    init_gpiote_double_click(); // Initialize GPIOTE for button handling
+
     const int device_id[LEDS_NUMBER] = {7, 2, 1, 4};
     const int led_pins[LEDS_NUMBER] = {YELLOW_LED_PIN, RED_LED_PIN, GREEN_LED_PIN, BLUE_LED_PIN};
-
+    
     int current_led = 0;
     int next_blink = 0;
 
-    int duty_cycle = 0;    // Start at 0% brightness
+    // for smooth blinking
+    int duty_cycle = 0;    // Start at 0% brightness     
     int fade_step = 1;     // Step to increase or decrease duty cycle
-
     led_off();
-
+    
     while (true)
     {
-        if (is_double_click)
+        if (is_blinking_active) 
         {
-            is_double_click = false; // Clear the flag after processing
-
-            for (int i = current_led; i < LEDS_NUMBER; i++)
+            for (int i = current_led; i < LEDS_NUMBER; i++) 
             {
-                for (int j = next_blink; j < device_id[i]; j++)
+                for (int j = next_blink; j < device_id[i]; j++) 
                 {
                     // Fade in: increase duty cycle from 0% to 100%
-                    for (duty_cycle = 0; duty_cycle <= 100; duty_cycle += fade_step)
+                    for (duty_cycle = 0; duty_cycle <= 100; duty_cycle += fade_step) 
                     {
                         pwm_dimming_led(led_pins[i], duty_cycle);
                     }
@@ -85,95 +143,23 @@ int main(void)
                     {
                         pwm_dimming_led(led_pins[i], duty_cycle);
                     }
-
-                    if (!is_double_click)
-                    {
-                        current_led = i;
-                        next_blink = j + 1;
-                        if (next_blink >= device_id[i])
-                        {
-                            next_blink = 0;
-                            current_led = (i + 1) % LEDS_NUMBER;
-                        }
-                        break;
-                    }
                 }
 
-                if (!is_double_click)
-                    break;
-
-                next_blink = 0;
-                nrf_delay_ms(1000);
+                // Reset blink count when moving to the next LED
+                next_blink = 0; 
+                nrf_delay_ms(1000);  // Delay between LEDs
             }
 
-            if ((current_led == (device_id[3] - 1)) && next_blink == 0 && is_double_click)
+            // If all LEDs have blinked, reset to first LED
+            if (next_blink == 0)
             {
                 current_led = 0;
-                next_blink = 0;
             }
         }
-    }
-}
-
-// GPIOTE event handler for button
-void gpiote_event_handler(nrfx_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
-{
-    if (pin == SW_BUTTON_PIN )
-    {
-        click_count++;
-        if (click_count == 1)
+        else
         {
-            app_timer_start(double_click_timer, APP_TIMER_TICKS(DOUBLE_CLICK_INTERVAL_MS), NULL);
-        }
-        else if (click_count == 2)
-        {
-            is_double_click = true;
-            app_timer_stop(double_click_timer);
-            click_count = 0; // Reset click count
+            // Turn off LEDs when blinking is inactive
+            led_off();
         }
     }
-}
-
-// Double-click timeout handler
-void double_click_timeout_handler(void *context)
-{
-    click_count = 0; // Reset click count if timeout occurs
-}
-
-// Other helper functions...
-
-void systick_delay_us(uint32_t delay_us)
-{
-    nrfx_systick_state_t start;
-    nrfx_systick_get(&start);
-    while (!nrfx_systick_test(&start, delay_us));
-}
-
-void pwm_dimming_led(int led_pin, int duty_cycle)
-{
-    int timeOn = (duty_cycle * PERIOD_US) / 100;
-    int timeOff = PERIOD_US - timeOn;
-
-    nrf_gpio_pin_write(led_pin, 0);
-    systick_delay_us(timeOn);
-
-    nrf_gpio_pin_write(led_pin, 1);
-    systick_delay_us(timeOff);
-}
-
-void gpio_init(void)
-{
-    nrf_gpio_cfg_output(YELLOW_LED_PIN);
-    nrf_gpio_cfg_output(RED_LED_PIN);
-    nrf_gpio_cfg_output(GREEN_LED_PIN);
-    nrf_gpio_cfg_output(BLUE_LED_PIN);
-    nrf_gpio_cfg_input(SW_BUTTON_PIN, NRF_GPIO_PIN_PULLUP);
-}
-
-void led_off(void)
-{
-    nrf_gpio_pin_write(YELLOW_LED_PIN, 1);
-    nrf_gpio_pin_write(RED_LED_PIN, 1);
-    nrf_gpio_pin_write(GREEN_LED_PIN, 1);
-    nrf_gpio_pin_write(BLUE_LED_PIN, 1);
 }
